@@ -12,27 +12,37 @@ from sys import argv, exit
 import math
 from PIL import Image, ImageStat  # pillow模块，计算亮度就靠他了
 import serial  # 串口通信模块
-#import serial.tools.list_port
 from serial.tools import list_ports
 import threading
+
+import matplotlib.pyplot as plt
+import xlwt
 
 
 class Ui_MainWindow:
 
     def __init__(self):
 
-        self.ui = QUiLoader().load("cameraV9.ui")
+        self.ui = QUiLoader().load("cameraV15.ui")
 
         # self.ui.button.clicked.connect(self.handleCalc)
 
-        self.timer_camera = QtCore.QTimer()   # 定时器
+        self.timer_camera = QtCore.QTimer()   # 定时器:界面刷新
+        self.timer_light = QtCore.QTimer()   # 定时器：光源
+        self.my_ser = Ser("com2", 9600)   # "COM3"
+        self.flag_compute = False
+        self.flag_plot = False
+        self.time_start_compute = time.time()
         # self.setupUi(MainWindow)            # 界面
         # self.retranslateUi(MainWindow)      # 界面
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # 准备获取图像，#选择第二个摄像头
-        # self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('M', 'J', 'P', 'G'))
+        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc('M', 'J', 'P', 'G'))
         self.CAM_NUM = 0
         # ret, frame = self.cap.read()
         # cv2.imshow('frame', frame)
+
+        self.list_time = [0]
+        self.list_value = [0]
 
         self.slot_init() # 设置槽函数
 
@@ -40,7 +50,8 @@ class Ui_MainWindow:
         # 设置槽函数
         self.ui.pushButton_open.clicked.connect(self.button_open_camera_click)     # 点击打开摄像头按钮，链接到打开摄像头函数
         self.timer_camera.timeout.connect(self.show_camera)        # 定时器到时槽函数（每隔一定时长刷新屏幕上的画面）
-        self.ui.pushButton_close.clicked.connect(self.closeEvent)  # 点击关闭
+        self.timer_light.timeout.connect(self.close_light)         # 定时器timeout时启动close_light
+        # self.ui.pushButton_close.clicked.connect(self.closeEvent)  # 点击关闭
         self.ui.pushButton_take.clicked.connect(self.takePhoto)    # 点击拍照
         # self.ui.pushButton_start_det.clicked.connect(self.button_start_det)
         self.ui.pushButton_start_open4C.clicked.connect(self.button_start_open4C)  # 点击设置光源
@@ -54,17 +65,22 @@ class Ui_MainWindow:
             QMessageBox.about(self.ui, '提示', '请输入检测阈值下限')
             return
 
-        global time_start
-        time_start = time.time()
         self.ui.label_time_2.setText(str(0))
         self.ui.label_time.setText(str(0))
+        self.open_camera()   # 打开摄像头
 
+    def start_compute(self):  # flag在打开界面时设置为true，在置为false前届面上的参数可以随时改，停止后改就没有用了
+        print("start_compute")
+        self.time_start_compute = time.time()
+        self.flag_compute = True    # 当计算完后，置为false，停止计算时间（屏幕再怎么刷新，界面上显示的最终时间并不会变了）
+
+    def open_camera(self):
         # 点击‘打开摄像头’按钮的槽函数//= self.cap.open(self.CAM_NUM)
         if not self.timer_camera.isActive():  # 简化if self.timer_camera.isActive() == False:
-            self.cap.open(self.CAM_NUM)
-            self.timer_camera.start(30)
+            # self.cap.open(self.CAM_NUM)
+            self.timer_camera.start(100)
         else:
-            self.timer_camera.start(30)
+            self.timer_camera.start(100)
             # flag = True
             # if flag == False:
             #     QMessageBox.warning(
@@ -74,20 +90,11 @@ class Ui_MainWindow:
             # else:
             #     self.timer_camera.start(30)
 
-
-
-
-
+    '''
+    给串口发送命令，open_camera 计算时间
+    '''
     def button_start_open4C(self):
-        os.system('DPS-4C.exe')
-    #     if self.timer_camera.isActive() != False:
-    #         global time_start
-    #         time_start = time.time()
-    #         self.timer_camera.start(30)
-    #         self.ui.label_time_2.setText(str(0))
-    #         self.ui.label_time.setText(str(0))
-    #     ser = serial.Serial('com1', 9600, timeout= None)
-    #     ser.ser_start_send_thread()
+      # os.system('DPS-4C.exe')
 
         # 获取串口
         port_list = list(serial.tools.list_ports.comports())
@@ -96,25 +103,72 @@ class Ui_MainWindow:
         else:
             for i in range(0, len(port_list)):
                 print(port_list[i])   # 打印所有串口
-        port_serial = port_list[0]    # 用第一个串口
 
-        # 实例化对象
-        my_ser = Ser(port_serial, 9600)   # "COM3"
-        if 0 == my_ser.err:
-            print("Init serial success.")
-        else:
-            QMessageBox(self.ui, '串口打开失败')
-
-        # 如果打开串口成功，启动发送线程
         send_data_open = "$1102016"     # 打开  第一通道  亮度值为100(如果命令字不是设置，而是打开，数据字没有用
         send_data_set = "$3106414"      # 设置  第一通道 亮度值为100
+
+        self.my_ser.ser_send_data(send_data_open)  # 发送打开光源命令
+        self.my_ser.ser_send_data(send_data_set)   # 发送设置光源命令
+        # self.timer_light.start(5*1000)     # 5s后启动
+        lightTime = self.ui.spinBox_time.value()   # 获取用户输入的打光时间N
+        self.timer_light.start(lightTime * 1000)   # Ns后启动，
+        # print('lightTime', self.ui.spinBox_time.value(), lightTime)
+
+        self.open_camera()
+
+
+    def close_light(self):
+        send_data_setZero = "$3100016"  # 设置  第一通道亮度值为0,   使下一次打开时是不亮的
         send_data_close = "$2102015"    # 关闭  第一通道
 
-        my_ser.ser_send_data(send_data_open)  # 发送打开光源命令
-        my_ser.ser_send_data(send_data_set)   # 发送设置光源命令
-        time.sleep(10)    # 间隔10s   # ~~~~~~~~~~~~~如何不影响采图？？？再开一个线程？
-        my_ser.ser_send_data(send_data_close)  # 发送关闭光源命令
-        self.ui.pushButton_open.clicked()   # 模拟点击开始打开摄像头命令   # ~~~~~~~~~~~~~能打开吗？？？
+        self.my_ser.ser_send_data(send_data_setZero)  # 发送设置光源为0命令
+        self.my_ser.ser_send_data(send_data_close)  # 发送关闭光源命令
+
+        self.start_compute()   # 开始计算时间
+        self.timer_light.stop()   # 定时器关闭
+        self.flag_plot = True
+
+        self.list_value.clear()  # 清空列表数据
+        self.list_time.clear()
+
+    def plot(self, x, squares):
+        plt.rcParams['font.sans-serif'] = ['SimHei']
+
+        # 设置横坐标和纵坐标的名称
+        plt.xlabel('time')
+        plt.ylabel('brightness')
+        # 图的标题
+        plt.title('发光材料亮度图')
+        # 刻度
+        plt.tick_params(axis='both', labelsize=10)
+
+        plt.scatter(x, squares, color='b', s=2, marker='.') # scatter  plot
+        # plt.plot(x, squares, color='b')
+        # s：点的大小/粗细 标量或array_like 默认是 rcParams['lines.markersize'] ** 2
+        # c: 点的颜色   c="#ff1212",
+        # marker: 标记的样式 默认是 'o',可查阅marker的类型
+        plt.show()
+
+    def saveData(self, value_list):
+        now_time = time.strftime('%Y-%m-%d-%H-%M-%S', time.localtime(time.time()))
+        f = xlwt.Workbook()  # 创建工作薄
+        sheet = f.add_sheet(u'sheet1', cell_overwrite_ok=True)  # 创建sheet
+        j = 0
+        for i in value_list:
+            sheet.write(j , 0 , i) # 循环写入，竖着写
+            f.save('lightness_' + str(now_time) + '.xls')
+
+    def text_Save(self, value_list):
+        now_time = time.strftime('%Y-%m-%d-%H-%M-%S', time.localtime(time.time()))
+        file_path = 'E:\\SaveData\\'  # 新创建的txt文件的存放路径
+        fileName = 'lightness_' + str(now_time)
+        full_path = file_path + fileName + '.txt'
+        file = open(full_path, 'w')
+        # file.write(value_list)
+        for i in range(len(value_list)):
+            s = str(value_list[i]) + '\n'
+            file.write(s)
+        # file.close()
 
     '''
     用PIL计算亮度：平均像素，然后转换为感知亮度(采用经验公式，像素的方式处理计算)
@@ -124,7 +178,7 @@ class Ui_MainWindow:
     #     r, g, b = stat.mean
     #     return math.sqrt(0.241 *(r ** 2)+ 0.691 *(g ** 2)+ 0.068 *(b ** 2))
 
-    def image_brightness1(self,rgb_image):
+    def image_brightness1(self, rgb_image):
         '''
         检测图像亮度(亮度平均值方法)
         '''
@@ -138,7 +192,7 @@ class Ui_MainWindow:
         avg = sum_brightness / area
         return avg
 
-    def image_brightness2(self,rgb_image):
+    def image_brightness2(self, rgb_image):
         '''
         检测图像亮度(灰度平均值方法)
         '''
@@ -146,7 +200,7 @@ class Ui_MainWindow:
         stat = ImageStat.Stat(gray_image)
         return stat.mean[0]
 
-    def image_brightness3(self,rgb_image):
+    def image_brightness3(self, rgb_image):
         '''
         检测图像亮度(基于经验公式)
         '''
@@ -176,6 +230,7 @@ class Ui_MainWindow:
         '''这是图1  QGraphicsView显示的代码'''
         # get a frame  利用摄像头对象的read()函数读取视频的某帧
         flag, self.image = self.cap.read()
+        # cv2.imshow('frame', self.image)
         show = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
         showImage = QtGui.QImage(show.data, show.shape[1], show.shape[0],
                                  QtGui.QImage.Format_RGB888)
@@ -299,7 +354,7 @@ class Ui_MainWindow:
 
         # ~~~~~~~~~计算余辉时间~~~~~~~~~~
         self.ui.label_time.setText(str('%.2f' % brightness1))  # 输出PIL算出的亮度值
-        print("brightness:", '%.2f' % brightness1, '%.2f' % brightness2, '%.2f' % brightness3, '%.2f' % brightness4)
+        # print("brightness:", '%.2f' % brightness1, '%.2f' % brightness2, '%.2f' % brightness3, '%.2f' % brightness4)
 
         # while brightness1 < self.ui.spinBox_thre.value():
         #     brightnessCount += 1
@@ -312,70 +367,100 @@ class Ui_MainWindow:
         #         self.timer_camera.stop()
         #         print('brightnessCount:',  brightnessCount)
         #         break
-        while brightness1 < self.ui.spinBox_thre.value():
+
+
+        time_lightoff = time.time()
+        time_gap = time_lightoff - self.time_start_compute
+
+        if self.flag_plot:
+            time_x = time.time()
+            list_time_x = time_x - self.time_start_compute
+
+            self.list_time.append(list_time_x)
+            self.list_value.append(brightness1)
+
+        if self.flag_compute and brightness1 < self.ui.spinBox_thre.value() and time_gap > 5:   #  一旦第一次小于阈值，计算时间的flag为false，就不再有新的time_end，计时就相当于停止了
             time_end = time.time()
-            time_count = time_end - time_start
+            time_count = time_end - self.time_start_compute
             print('totally cost', '%.2f' % time_count)
             # QMessageBox.about(self.ui, '余辉时间为', '%.2f' % time_count, )  # '''{time_count}'''
             self.ui.label_time_2.setText(str('%.2f' % time_count))
-            self.timer_camera.stop()
-            break
+            self.flag_compute = False
 
+            self.plot(self.list_time, self.list_value)   # 绘图
+            print(self.list_value)
+            print(self.list_time)
+            # self.saveData(self.list_value)  # 存excel文件
+            self.text_Save(self.list_value)  # 存txt文件
+
+            self.list_value.clear()   # 清空列表数据
+            self.list_time.clear()
 
     def takePhoto(self):
         if self.timer_camera.isActive():  # self.timer_camera.isActive() != False:
             now_time = time.strftime('%Y-%m-%d-%H-%M-%S', time.localtime(time.time()))
             print(now_time)
-            cv2.imwrite('pic_'+str(now_time)+'.png', self.image)
+            file_path = 'E:\\SaveData\\'
+            cv2.imwrite(file_path + 'pic_'+str(now_time)+'.png', self.image)
 
             cv2.putText(self.image, 'The picture have saved !',
                         (int(self.image.shape[1]/2-130), int(self.image.shape[0]/2)),
                         cv2.FONT_HERSHEY_SCRIPT_COMPLEX,
                         1.0, (255, 0, 0), 1)
 
-            self.timer_camera.stop()
+            # self.timer_camera.stop()
 
-            show = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)  # 左右翻转
+            # show = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)  # 左右翻转
+            #
+            # # 创建场景
+            # scene1 = QGraphicsScene()
+            # scene2 = QGraphicsScene()
+            # scene3 = QGraphicsScene()
+            #
+            # scene1.addPixmap(QtGui.QPixmap.fromImage(show))  # 给场景添加图元
+            # self.ui.label_face.setScene(scene1)
+            #
+            # scene2.addPixmap(QtGui.QPixmap.fromImage(gray_image))
+            # self.ui.label_gray.setScene(scene2)
+            #
+            # scene3.addPixmap(QtGui.QPixmap.fromImage(gray_opencv_mask))
+            # self.ui.label_gray_2.setScene(scene3)
 
-            showImage = QtGui.QImage(show.data, show.shape[1], show.shape[0], QtGui.QImage.Format_RGB888)
-            self.ui.label_face.setPixmap(QtGui.QPixmap.fromImage(showImage))
-            self.ui.label_face.setScaledContents(True)
-
-    def closeEvent(self):
-        if self.timer_camera.isActive():  # self.timer_camera.isActive() != False:
-            ok = QtWidgets.QPushButton()
-            cacel = QtWidgets.QPushButton()
-
-            msg = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Warning, u"关闭", u"是否关闭！")
-
-            msg.addButton(ok, QtWidgets.QMessageBox.ActionRole)
-            msg.addButton(cacel, QtWidgets.QMessageBox.RejectRole)
-            ok.setText(u'确定')
-            cacel.setText(u'取消')
-
-            if msg.exec_() != QtWidgets.QMessageBox.RejectRole:
-
-                if self.cap.isOpened():
-                    self.cap.release()
-                if self.timer_camera.isActive():
-                    self.timer_camera.stop()
-
-                # 创建场景
-                scene1 = QGraphicsScene()
-                scene2 = QGraphicsScene()
-                scene3 = QGraphicsScene()
-                # 在场景中添加文字
-                scene1.addText("摄像头已关闭")
-                scene2.addText("摄像头已关闭")
-                scene3.addText("摄像头已关闭")
-                # 将场景加载到窗口
-                self.ui.label_face.setScene(scene1)
-                self.ui.label_gray.setScene(scene2)
-                self.ui.label_gray_2.setScene(scene3)
-
-                # self.ui.label_face.setText("<html><head/><body><p align=\"center\"><img src=\":/newPrefix/pic/Hint.png\"/><span style=\" font-size:28pt;\">点击打开摄像头</span><br/></p></body></html>")
-                # self.ui.label_gray.setText("<html><head/><body><p align=\"center\"><img src=\":/newPrefix/pic/Hint.png\"/><span style=\" font-size:28pt;\">点击打开摄像头</span><br/></p></body></html>")
-                # self.ui.label_gray_2.setText("<html><head/><body><p align=\"center\"><img src=\":/newPrefix/pic/Hint.png\"/><span style=\" font-size:28pt;\">点击打开摄像头</span><br/></p></body></html>")
+    # def closeEvent(self):
+    #     if self.timer_camera.isActive():  # self.timer_camera.isActive() != False:
+    #         ok = QtWidgets.QPushButton()
+    #         cacel = QtWidgets.QPushButton()
+    #
+    #         msg = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Warning, u"关闭", u"是否关闭！")
+    #
+    #         msg.addButton(ok, QtWidgets.QMessageBox.ActionRole)
+    #         msg.addButton(cacel, QtWidgets.QMessageBox.RejectRole)
+    #         ok.setText(u'确定')
+    #         cacel.setText(u'取消')
+    #
+    #         if msg.exec_() != QtWidgets.QMessageBox.RejectRole:
+    #
+    #             if self.cap.isOpened():
+    #                 self.cap.release()
+    #             if self.timer_camera.isActive():
+    #                 self.timer_camera.stop()
+    #
+    #             # 创建场景
+    #             scene1 = QGraphicsScene()
+    #             scene2 = QGraphicsScene()
+    #             scene3 = QGraphicsScene()
+    #             # 在场景中添加文字
+    #             scene1.addText("摄像头已关闭")
+    #             scene2.addText("摄像头已关闭")
+    #             scene3.addText("摄像头已关闭")
+    #             # 将场景加载到窗口
+    #             self.ui.label_face.setScene(scene1)
+    #             self.ui.label_gray.setScene(scene2)
+    #             self.ui.label_gray_2.setScene(scene3)
+    #
+    #             # self.ui.label_face.setText("<html><head/><body><p align=\"center\"><img src=\":/newPrefix/pic/Hint.png\"/><span style=\" font-size:28pt;\">点击打开摄像头</span><br/></p></body></html>")
+    #             # self.ui.label_gray.setText("<html><head/><body><p align=\"center\"><img src=\":/newPrefix/pic/Hint.png\"/><span style=\" font-size:28pt;\">点击打开摄像头</span><br/></p></body></html>")
+    #             # self.ui.label_gray_2.setText("<html><head/><body><p align=\"center\"><img src=\":/newPrefix/pic/Hint.png\"/><span style=\" font-size:28pt;\">点击打开摄像头</span><br/></p></body></html>")
 
 class Ser(object):
     def __init__(self, port, baud):
@@ -392,7 +477,7 @@ class Ser(object):
     def get_port_list(self):
         port_list = list(serial.tools.list_ports.comports())
         if len(port_list) == 0:
-            print('找不dao到串口')
+            print('找不到串口')
         else:
             for i in range(0, len(port_list)):
                 print(port_list[i])
@@ -419,9 +504,9 @@ class Ser(object):
     def ser_send_data(self, data):
         self.serial.write(data.encode())
 
-    def start_send_thread(self, data):  # ~~~~~~~~~~~~~~~~~~~~~~~~~data对不对？？？
-        thread = threading.Thread(target= self.ser_send_data(data), daemon=True)
-        thread.start()
+    # def start_send_thread(self, data):  # ~~~~~~~~~~~~~~~~~~~~~~~~~data对不对？？？
+    #     thread = threading.Thread(target= self.ser_send_data(data), daemon=True)
+    #     thread.start()
 
     def ser_close(self):
         self.serial.close()   # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~是否要关闭线程？？？

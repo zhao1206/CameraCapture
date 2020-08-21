@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1113</width>
-    <height>654</height>
+    <width>1018</width>
+    <height>622</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -184,7 +184,7 @@
           </font>
          </property>
          <property name="text">
-          <string>光源设定</string>
+          <string>光源+开始检测</string>
          </property>
         </widget>
        </item>
@@ -481,7 +481,7 @@
              </property>
              <property name="font">
               <font>
-               <family>华文仿宋</family>
+               <family>仿宋</family>
                <pointsize>14</pointsize>
               </font>
              </property>
@@ -493,27 +493,7 @@
           </layout>
          </item>
          <item>
-          <layout class="QHBoxLayout" name="horizontalLayout_10">
-           <item>
-            <widget class="QPushButton" name="pushButton_close">
-             <property name="sizePolicy">
-              <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
-               <horstretch>0</horstretch>
-               <verstretch>0</verstretch>
-              </sizepolicy>
-             </property>
-             <property name="font">
-              <font>
-               <family>仿宋</family>
-               <pointsize>14</pointsize>
-              </font>
-             </property>
-             <property name="text">
-              <string>关闭摄像头</string>
-             </property>
-            </widget>
-           </item>
-          </layout>
+          <layout class="QHBoxLayout" name="horizontalLayout_10"/>
          </item>
          <item>
           <layout class="QHBoxLayout" name="horizontalLayout_9">
@@ -556,7 +536,7 @@
        <item>
         <layout class="QVBoxLayout" name="verticalLayout_5">
          <item>
-          <layout class="QHBoxLayout" name="horizontalLayout_11">
+          <layout class="QHBoxLayout" name="horizontalLayout_11" stretch="25,45">
            <item>
             <widget class="QLabel" name="label_5">
              <property name="sizePolicy">
@@ -572,7 +552,7 @@
               </font>
              </property>
              <property name="text">
-              <string>亮度值</string>
+              <string>亮 度 值</string>
              </property>
             </widget>
            </item>
@@ -586,6 +566,9 @@
              </property>
              <property name="styleSheet">
               <string notr="true"/>
+             </property>
+             <property name="frameShape">
+              <enum>QFrame::StyledPanel</enum>
              </property>
              <property name="text">
               <string/>
@@ -622,6 +605,9 @@
                <family>Arial</family>
                <pointsize>12</pointsize>
               </font>
+             </property>
+             <property name="frameShape">
+              <enum>QFrame::StyledPanel</enum>
              </property>
              <property name="text">
               <string/>
